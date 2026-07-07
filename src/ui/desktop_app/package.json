@@ -1,0 +1,17 @@
+{
+  "name": "unified-edr-monitor",
+  "version": "2.0.0",
+  "description": "Unified EDR Monitor — standalone Electron app",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron . --no-sandbox",
+    "rebuild": "electron-rebuild"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.4.3"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "@electron/rebuild": "^3.6.0"
+  }
+}

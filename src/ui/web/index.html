@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unified EDR Monitor</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+<div class="app-container">
+
+    <!-- ── Sidebar ─────────────────────────────────────── -->
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="logo"></div>
+            <div class="brand-text">
+                <span class="brand-name">EDR Monitor</span>
+                <span class="brand-sub">eBPF Powered</span>
+            </div>
+        </div>
+
+        <nav class="nav-menu">
+            <a href="#" class="nav-item active" data-target="processes">
+                <span class="nav-icon">⬡</span> Per Process
+            </a>
+            <a href="#" class="nav-item" data-target="global-network">
+                <span class="nav-icon">⇄</span> Global Network
+            </a>
+            <a href="#" class="nav-item" data-target="global-io">
+                <span class="nav-icon">◫</span> Global I/O
+            </a>
+            <a href="#" class="nav-item" data-target="global-priv">
+                <span class="nav-icon">⚠</span> Global Privilege
+            </a>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="status-indicator">
+                <span class="dot"></span>
+                <span id="status-text">Live</span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ── Main ───────────────────────────────────────── -->
+    <main class="main-content">
+        <header class="top-bar">
+            <div class="top-bar-left">
+                <button id="btn-back" class="btn-back hidden">← Back to Processes</button>
+                <h1 id="page-title">Per Process View</h1>
+            </div>
+            <div class="top-bar-stats">
+                <div class="mini-stat"><span id="stat-procs">0</span><label>Processes</label></div>
+                <div class="mini-stat"><span id="stat-flows">0</span><label>Net Flows</label></div>
+                <div class="mini-stat"><span id="stat-io">0</span><label>I/O Ops</label></div>
+                <div class="mini-stat alert"><span id="stat-priv">0</span><label>Escalations</label></div>
+            </div>
+        </header>
+
+        <div class="content-area">
+
+            <!-- ══ Per Process: List ══════════════════════════ -->
+            <section id="processes" class="section active">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>All Monitored Processes</h2>
+                        <input id="proc-search" class="search-box" type="text" placeholder="Filter by name or PID…">
+                    </div>
+                    <div class="table-container">
+                        <table id="table-processes">
+                            <thead><tr>
+                                <th class="sortable" data-col="0" data-type="num">PID <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="1" data-type="str">Process <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="2" data-type="num">Net Flows <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="3" data-type="num">TX Pkts <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="4" data-type="num">RX Pkts <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="5" data-type="num">File Writes <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="6" data-type="num">Bytes Written <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="7" data-type="str">Priv. Esc. <span class="sort-icon">⇅</span></th>
+                                <th></th>
+                            </tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ══ Per Process: Detail ════════════════════════ -->
+            <section id="process-detail" class="section">
+                <div class="proc-detail-header">
+                    <div class="proc-identity">
+                        <div class="proc-avatar" id="detail-avatar">?</div>
+                        <div>
+                            <div class="proc-name" id="detail-name">—</div>
+                            <div class="proc-pid"  id="detail-pid">PID —</div>
+                        </div>
+                    </div>
+                    <div class="proc-summary-stats">
+                        <div class="proc-stat"><span id="d-flows">0</span><label>Flows</label></div>
+                        <div class="proc-stat"><span id="d-tx">0</span><label>TX Pkts</label></div>
+                        <div class="proc-stat"><span id="d-rx">0</span><label>RX Pkts</label></div>
+                        <div class="proc-stat"><span id="d-writes">0</span><label>Writes</label></div>
+                        <div class="proc-stat"><span id="d-bytes">0 B</span><label>Bytes</label></div>
+                    </div>
+                </div>
+
+                <div class="sub-tabs">
+                    <button class="sub-tab active" data-subtab="detail-network">Network Sockets</button>
+                    <button class="sub-tab" data-subtab="detail-io">File I/O</button>
+                    <button class="sub-tab" data-subtab="detail-priv">Privilege</button>
+                </div>
+
+                <div class="sub-content">
+                    <div id="detail-network" class="sub-section active">
+                        <div class="table-container">
+                            <table id="table-detail-network">
+                                <thead><tr>
+                                    <th class="sortable" data-col="0" data-type="str">Local IP <span class="sort-icon">⇅</span></th>
+                                    <th class="sortable" data-col="1" data-type="num">Local Port <span class="sort-icon">⇅</span></th>
+                                    <th class="sortable" data-col="2" data-type="str">Remote IP <span class="sort-icon">⇅</span></th>
+                                    <th class="sortable" data-col="3" data-type="num">Remote Port <span class="sort-icon">⇅</span></th>
+                                    <th class="sortable" data-col="4" data-type="num">TX Pkts <span class="sort-icon">⇅</span></th>
+                                    <th class="sortable" data-col="5" data-type="num">RX Pkts <span class="sort-icon">⇅</span></th>
+                                </tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id="detail-io" class="sub-section">
+                        <div class="table-container">
+                            <table id="table-detail-io">
+                                <thead><tr>
+                                    <th class="sortable" data-col="0" data-type="num">FD <span class="sort-icon">⇅</span></th>
+                                    <th class="sortable" data-col="1" data-type="num">Write Calls <span class="sort-icon">⇅</span></th>
+                                    <th class="sortable" data-col="2" data-type="num">Bytes Written <span class="sort-icon">⇅</span></th>
+                                </tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id="detail-priv" class="sub-section">
+                        <div class="table-container">
+                            <table id="table-detail-priv">
+                                <thead><tr>
+                                    <th>User</th>
+                                    <th>Old UID</th>
+                                    <th>New UID</th>
+                                    <th class="sortable" data-col="3" data-type="num">Events <span class="sort-icon">⇅</span></th>
+                                    <th class="sortable" data-col="4" data-type="str">First Seen <span class="sort-icon">⇅</span></th>
+                                    <th class="sortable" data-col="5" data-type="str">Last Seen <span class="sort-icon">⇅</span></th>
+                                </tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ══ Global Network ═════════════════════════════ -->
+            <section id="global-network" class="section">
+                <div class="card">
+                    <h2>Global Network Flows</h2>
+                    <div class="table-container">
+                        <table id="table-global-network">
+                            <thead><tr>
+                                <th class="sortable" data-col="0" data-type="num">PID <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="1" data-type="str">Process <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="2" data-type="str">Local IP <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="3" data-type="num">Local Port <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="4" data-type="str">Remote IP <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="5" data-type="num">Remote Port <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="6" data-type="num">TX Pkts <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="7" data-type="num">RX Pkts <span class="sort-icon">⇅</span></th>
+                            </tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ══ Global I/O ══════════════════════════════════ -->
+            <section id="global-io" class="section">
+                <div class="card">
+                    <h2>Global File I/O</h2>
+                    <div class="table-container">
+                        <table id="table-global-io">
+                            <thead><tr>
+                                <th class="sortable" data-col="0" data-type="num">PID <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="1" data-type="str">Process <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="2" data-type="num">FD <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="3" data-type="num">Write Calls <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="4" data-type="num">Bytes Written <span class="sort-icon">⇅</span></th>
+                            </tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ══ Global Privilege ════════════════════════════ -->
+            <section id="global-priv" class="section">
+                <div class="card">
+                    <h2>Global Privilege Escalations</h2>
+                    <div class="table-container">
+                        <table id="table-global-priv">
+                            <thead><tr>
+                                <th class="sortable" data-col="0" data-type="num">PID <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="1" data-type="str">Process <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="2" data-type="str">User <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="3" data-type="num">Old UID <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="4" data-type="num">New UID <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="5" data-type="num">Events <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="6" data-type="str">First Seen <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="7" data-type="str">Last Seen <span class="sort-icon">⇅</span></th>
+                            </tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+    </main>
+</div>
+<script src="script.js"></script>
+</body>
+</html>

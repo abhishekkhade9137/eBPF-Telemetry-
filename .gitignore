@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+src/ui/desktop_app/node_modules/
+
+# Compiled eBPF binaries and user space binaries
+bin/
+*.o
+*.skel.h
+
+# SQLite Database files
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# Electron/dist or local builds
+dist/
+out/
+.electron/
+
+# OS files
+.DS_Store
