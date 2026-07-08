@@ -9,6 +9,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let activeSubTab = 'detail-network';
     let activeSection = 'processes';
 
+    // ─── Keyed-row tracking: tableId → Map<key, tr> ────────
+    // Lets us patch only changed cells instead of rebuilding the whole table.
+    const rowMaps = {};
+
     // ═══════════════════════════════════════════════════════
     //  NAVIGATION – main tabs
     // ═══════════════════════════════════════════════════════
@@ -71,25 +75,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ═══════════════════════════════════════════════════════
-    //  SCROLL PRESERVATION
-    // ═══════════════════════════════════════════════════════
-    function saveScrolls() {
-        return {
-            content: document.querySelector('.content-area')?.scrollTop ?? 0,
-            sub:     document.querySelector('.sub-content')?.scrollTop  ?? 0,
-        };
-    }
-
-    function restoreScrolls(saved) {
-        requestAnimationFrame(() => {
-            const ca = document.querySelector('.content-area');
-            const sc = document.querySelector('.sub-content');
-            if (ca) ca.scrollTop = saved.content;
-            if (sc) sc.scrollTop = saved.sub;
-        });
-    }
-
-    // ═══════════════════════════════════════════════════════
     //  SORT ENGINE — persistent across refreshes
     // ═══════════════════════════════════════════════════════
     function sortRows(tbody, col, dir, type) {
@@ -107,20 +92,14 @@ document.addEventListener('DOMContentLoaded', () => {
             .forEach(r => tbody.appendChild(r));
     }
 
-    // Re-apply stored sort to a table after it has been rebuilt
     function reapplySort(tableId) {
         const state = sortState[tableId];
         if (!state) return;
         const table = document.getElementById(tableId);
         if (!table) return;
-
-        // Update sort icons to reflect current state
         table.querySelectorAll('.sort-icon').forEach(i => i.textContent = '⇅');
         const activeTh = table.querySelector(`th[data-col="${state.col}"]`);
-        if (activeTh) {
-            activeTh.querySelector('.sort-icon').textContent = state.dir === 'asc' ? '▲' : '▼';
-        }
-
+        if (activeTh) activeTh.querySelector('.sort-icon').textContent = state.dir === 'asc' ? '▲' : '▼';
         sortRows(table.querySelector('tbody'), state.col, state.dir, state.type);
     }
 
@@ -133,14 +112,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const type = th.dataset.type;
                 const prev = sortState[tableId] || {};
                 const dir  = (prev.col === col && prev.dir === 'asc') ? 'desc' : 'asc';
-
-                // Persist the sort choice
                 sortState[tableId] = { col, dir, type };
-
-                // Update icons
                 table.querySelectorAll('.sort-icon').forEach(i => i.textContent = '⇅');
                 th.querySelector('.sort-icon').textContent = dir === 'asc' ? '▲' : '▼';
-
                 sortRows(table.querySelector('tbody'), col, dir, type);
             });
         });
@@ -187,25 +161,95 @@ document.addEventListener('DOMContentLoaded', () => {
         const cols = document.querySelectorAll(`#${tableId} th`).length;
         tbody.innerHTML = `<tr><td colspan="${cols}" class="empty-state">
             <span class="icon">◌</span>${msg}</td></tr>`;
+        // Reset row map since we wiped the tbody
+        rowMaps[tableId] = new Map();
     }
 
-    // Build rows then immediately re-apply any active sort for this table
-    function renderTable(tableId, rows, rowBuilder) {
+    // ═══════════════════════════════════════════════════════
+    //  KEYED DIFF RENDERER — NO full wipe, NO scroll jump
+    // ═══════════════════════════════════════════════════════
+    /**
+     * Diff-patches a tbody using a stable key per row.
+     *
+     * @param {string}   tableId
+     * @param {Array}    rows        – data rows to display
+     * @param {Function} keyFn       – (row) => unique string key
+     * @param {Function} cellsFn     – (row) => array of {html, raw} per cell
+     *                                   `html` is innerHTML, `raw` is the text used
+     *                                   for dirty-check (omit to always use html)
+     * @param {Function} [onNew]     – optional callback(tr, row) after a new <tr> is inserted
+     */
+    function patchTable(tableId, rows, keyFn, cellsFn, onNew) {
         const tbody = document.querySelector(`#${tableId} tbody`);
         if (!tbody) return;
-        if (!rows.length) { renderEmpty(tableId, 'No data yet'); return; }
-        tbody.innerHTML = '';
-        rows.forEach(row => {
-            const tr = document.createElement('tr');
-            tr.innerHTML = rowBuilder(row);
-            tbody.appendChild(tr);
+
+        if (!rowMaps[tableId]) rowMaps[tableId] = new Map();
+        const map = rowMaps[tableId];
+
+        if (!rows.length) {
+            // Preserve empty-state only if already shown
+            if (tbody.querySelector('.empty-state')) return;
+            renderEmpty(tableId, 'No data yet');
+            return;
+        }
+
+        // Remove stale empty-state row if present
+        const emptyRow = tbody.querySelector('.empty-state');
+        if (emptyRow) {
+            emptyRow.closest('tr').remove();
+            map.clear();
+        }
+
+        const newKeys = new Set();
+
+        rows.forEach((row, idx) => {
+            const key = keyFn(row);
+            newKeys.add(key);
+            const cells = cellsFn(row);
+
+            if (map.has(key)) {
+                // ── Existing row: patch only changed cells ──────────
+                const tr = map.get(key);
+                cells.forEach((cell, ci) => {
+                    const td = tr.cells[ci];
+                    if (!td) return;
+                    const dirty = cell.raw !== undefined
+                        ? td.dataset.raw !== String(cell.raw)
+                        : td.innerHTML !== cell.html;
+                    if (dirty) {
+                        td.innerHTML = cell.html;
+                        if (cell.raw !== undefined) td.dataset.raw = String(cell.raw);
+                    }
+                });
+            } else {
+                // ── New row: create and insert ──────────────────────
+                const tr = document.createElement('tr');
+                cells.forEach(cell => {
+                    const td = document.createElement('td');
+                    td.innerHTML = cell.html;
+                    if (cell.raw !== undefined) td.dataset.raw = String(cell.raw);
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+                map.set(key, tr);
+                if (onNew) onNew(tr, row);
+            }
         });
-        // KEY FIX: re-apply the saved sort so every refresh keeps the column order
+
+        // Remove rows whose keys are no longer present
+        for (const [key, tr] of map) {
+            if (!newKeys.has(key)) {
+                tr.remove();
+                map.delete(key);
+            }
+        }
+
+        // Re-apply sort only if we added/removed rows (order may have changed)
         reapplySort(tableId);
     }
 
     // ═══════════════════════════════════════════════════════
-    //  BUILD PROCESS MAP
+    //  BUILD PROCESS MAP  (single call per update cycle)
     // ═══════════════════════════════════════════════════════
     function buildPidMap(data) {
         const map = {};
@@ -233,11 +277,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // ═══════════════════════════════════════════════════════
     //  PROCESS DETAIL VIEW
     // ═══════════════════════════════════════════════════════
-    function openProcessDetail(pid, resetSubTab) {
+    function openProcessDetail(pid, resetSubTab, pidMap) {
         currentPid = pid;
-        const data   = latestData;
-        const pidMap = buildPidMap(data);
-        const p      = pidMap[pid];
+        const data = latestData;
+        const p    = pidMap[pid];
         if (!p) return;
 
         document.getElementById('detail-avatar').textContent = p.comm[0]?.toUpperCase() || '?';
@@ -252,33 +295,51 @@ document.addEventListener('DOMContentLoaded', () => {
         if (resetSubTab) activeSubTab = 'detail-network';
         applySubTab(activeSubTab);
 
+        // Network flows for this PID
         const pidFlows = data.flows.filter(f => f.pid === pid);
-        renderTable('table-detail-network', pidFlows, f => `
-            <td><code>${f.local_ip}</code></td>
-            <td>${f.local_port}</td>
-            <td><code>${f.remote_ip}</code></td>
-            <td>${f.remote_port}</td>
-            <td>${f.tx_packets}</td>
-            <td>${f.rx_packets}</td>
-        `);
+        patchTable(
+            'table-detail-network',
+            pidFlows,
+            f => `${f.local_ip}:${f.local_port}-${f.remote_ip}:${f.remote_port}`,
+            f => [
+                { html: `<code>${f.local_ip}</code>`,  raw: f.local_ip },
+                { html: `${f.local_port}`,             raw: f.local_port },
+                { html: `<code>${f.remote_ip}</code>`, raw: f.remote_ip },
+                { html: `${f.remote_port}`,            raw: f.remote_port },
+                { html: `${f.tx_packets}`,             raw: f.tx_packets },
+                { html: `${f.rx_packets}`,             raw: f.rx_packets },
+            ]
+        );
 
+        // File I/O for this PID
         const pidIO = data.file_writes.filter(w => w.pid === pid);
-        renderTable('table-detail-io', pidIO, w => `
-            <td>${w.fd}</td>
-            <td>${w.write_calls}</td>
-            <td>${fmtBytes(w.bytes_written)}</td>
-        `);
+        patchTable(
+            'table-detail-io',
+            pidIO,
+            w => `${w.pid}-${w.fd}`,
+            w => [
+                { html: `${w.fd}`,                raw: w.fd },
+                { html: `${w.write_calls}`,        raw: w.write_calls },
+                { html: `${fmtBytes(w.bytes_written)}`, raw: w.bytes_written },
+            ]
+        );
 
+        // Privilege escalations for this PID
         const pidPriv = data.priv_esc.filter(pr => pr.pid === pid);
         if (pidPriv.length) {
-            renderTable('table-detail-priv', pidPriv, pr => `
-                <td><span class="user-badge">${pr.username}</span></td>
-                <td>${pr.old_uid}</td>
-                <td style="color:var(--danger);font-weight:700">${pr.new_uid}</td>
-                <td>${pr.escalation_count}</td>
-                <td class="ts-cell">${fmtTime(pr.first_seen)}</td>
-                <td class="ts-cell">${fmtTime(pr.last_seen)}</td>
-            `);
+            patchTable(
+                'table-detail-priv',
+                pidPriv,
+                pr => `${pr.pid}-${pr.old_uid}-${pr.new_uid}`,
+                pr => [
+                    { html: `<span class="user-badge">${pr.username}</span>`, raw: pr.username },
+                    { html: `${pr.old_uid}`,           raw: pr.old_uid },
+                    { html: `<span style="color:var(--danger);font-weight:700">${pr.new_uid}</span>`, raw: pr.new_uid },
+                    { html: `${pr.escalation_count}`,  raw: pr.escalation_count },
+                    { html: `<span class="ts-cell">${fmtTime(pr.first_seen)}</span>`, raw: pr.first_seen },
+                    { html: `<span class="ts-cell">${fmtTime(pr.last_seen)}</span>`,  raw: pr.last_seen },
+                ]
+            );
         } else {
             renderEmpty('table-detail-priv', 'No privilege escalations for this process');
         }
@@ -287,103 +348,128 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ═══════════════════════════════════════════════════════
-    //  UPDATE ALL VIEWS
+    //  UPDATE ALL VIEWS  — one pidMap, no full rebuilds
     // ═══════════════════════════════════════════════════════
     function updateAll(data) {
         latestData = data;
-        const scrolls = saveScrolls();
 
-        // Top-bar stats
-        document.getElementById('stat-procs').textContent = Object.keys(buildPidMap(data)).length;
+        // Build the pid aggregation map ONCE per cycle
+        const pidMap = buildPidMap(data);
+
+        // ── Top-bar stats (text node patches, no layout) ──────
+        document.getElementById('stat-procs').textContent = Object.keys(pidMap).length;
         document.getElementById('stat-flows').textContent = data.flows.length;
         document.getElementById('stat-io').textContent    = data.file_writes.reduce((a, w) => a + w.write_calls, 0);
         document.getElementById('stat-priv').textContent  = data.priv_esc.reduce((a, p) => a + p.escalation_count, 0);
 
-        // Per Process list — only rebuild when not in detail view
+        // ── Per-process table (keyed diff, no scroll reset) ───
         if (activeSection !== 'process-detail') {
-            const pidMap   = buildPidMap(data);
             const procList = Object.values(pidMap).sort((a, b) => (b.tx + b.rx) - (a.tx + a.rx));
-            const procBody = document.querySelector('#table-processes tbody');
-            procBody.innerHTML = '';
-            procList.forEach(p => {
-                const tr = document.createElement('tr');
-                tr.className = 'clickable';
-                tr.innerHTML = `
-                    <td><span class="tag">${p.pid}</span></td>
-                    <td><strong>${p.comm}</strong></td>
-                    <td>${p.flows}</td>
-                    <td>${p.tx}</td>
-                    <td>${p.rx}</td>
-                    <td>${p.writes}</td>
-                    <td>${fmtBytes(p.bytes)}</td>
-                    <td>${p.privEsc ? '<span class="badge-danger">⚠ YES</span>' : '<span class="badge-ok">✓ No</span>'}</td>
-                    <td><button class="btn-detail">Inspect →</button></td>
-                `;
-                tr.querySelector('.btn-detail').addEventListener('click', e => {
-                    e.stopPropagation();
-                    openProcessDetail(p.pid, true);
-                });
-                tr.addEventListener('click', () => openProcessDetail(p.pid, true));
-                procBody.appendChild(tr);
-            });
-            if (!procList.length) renderEmpty('table-processes', 'No processes captured yet');
-            reapplySort('table-processes');  // restore sort after rebuild
-            applySearch();                   // restore search filter after rebuild
+            patchTable(
+                'table-processes',
+                procList,
+                p => String(p.pid),
+                p => [
+                    { html: `<span class="tag">${p.pid}</span>`, raw: p.pid },
+                    { html: `<strong>${p.comm}</strong>`,        raw: p.comm },
+                    { html: `${p.flows}`,   raw: p.flows },
+                    { html: `${p.tx}`,      raw: p.tx },
+                    { html: `${p.rx}`,      raw: p.rx },
+                    { html: `${p.writes}`,  raw: p.writes },
+                    { html: `${fmtBytes(p.bytes)}`, raw: p.bytes },
+                    { html: p.privEsc
+                        ? '<span class="badge-danger">⚠ YES</span>'
+                        : '<span class="badge-ok">✓ No</span>',   raw: p.privEsc ? 1 : 0 },
+                    { html: `<button class="btn-detail">Inspect →</button>`, raw: p.pid },
+                ],
+                (tr, p) => {
+                    // Wire up click handlers only once, when the row is NEW
+                    tr.classList.add('clickable');
+                    tr.querySelector('.btn-detail').addEventListener('click', e => {
+                        e.stopPropagation();
+                        openProcessDetail(p.pid, true, buildPidMap(latestData));
+                    });
+                    tr.addEventListener('click', () => openProcessDetail(p.pid, true, buildPidMap(latestData)));
+                }
+            );
+            applySearch(); // restore search filter
         }
 
-        // Refresh detail view live without resetting tab/scroll
+        // ── Refresh detail view live without resetting tab/scroll
         if (currentPid !== null) {
-            openProcessDetail(currentPid, false);
+            openProcessDetail(currentPid, false, pidMap);
         }
 
-        // Global tabs — only render when visible
+        // ── Global tabs — only render when visible ────────────
         if (activeSection === 'global-network') {
-            renderTable('table-global-network', data.flows, f => `
-                <td><span class="tag">${f.pid}</span></td>
-                <td>${f.comm}</td>
-                <td><code>${f.local_ip}</code></td>
-                <td>${f.local_port}</td>
-                <td><code>${f.remote_ip}</code></td>
-                <td>${f.remote_port}</td>
-                <td>${f.tx_packets}</td>
-                <td>${f.rx_packets}</td>
-            `);
+            patchTable(
+                'table-global-network',
+                data.flows,
+                f => `${f.pid}-${f.local_ip}:${f.local_port}-${f.remote_ip}:${f.remote_port}`,
+                f => [
+                    { html: `<span class="tag">${f.pid}</span>`, raw: f.pid },
+                    { html: `${f.comm}`,                         raw: f.comm },
+                    { html: `<code>${f.local_ip}</code>`,        raw: f.local_ip },
+                    { html: `${f.local_port}`,                   raw: f.local_port },
+                    { html: `<code>${f.remote_ip}</code>`,       raw: f.remote_ip },
+                    { html: `${f.remote_port}`,                  raw: f.remote_port },
+                    { html: `${f.tx_packets}`,                   raw: f.tx_packets },
+                    { html: `${f.rx_packets}`,                   raw: f.rx_packets },
+                ]
+            );
         }
 
         if (activeSection === 'global-io') {
-            renderTable('table-global-io', data.file_writes, w => `
-                <td><span class="tag">${w.pid}</span></td>
-                <td>${w.comm}</td>
-                <td>${w.fd}</td>
-                <td>${w.write_calls}</td>
-                <td>${fmtBytes(w.bytes_written)}</td>
-            `);
+            patchTable(
+                'table-global-io',
+                data.file_writes,
+                w => `${w.pid}-${w.fd}`,
+                w => [
+                    { html: `<span class="tag">${w.pid}</span>`, raw: w.pid },
+                    { html: `${w.comm}`,                         raw: w.comm },
+                    { html: `${w.fd}`,                           raw: w.fd },
+                    { html: `${w.write_calls}`,                  raw: w.write_calls },
+                    { html: `${fmtBytes(w.bytes_written)}`,      raw: w.bytes_written },
+                ]
+            );
         }
 
         if (activeSection === 'global-priv') {
             if (data.priv_esc.length) {
-                renderTable('table-global-priv', data.priv_esc, p => `
-                    <td><span class="tag">${p.pid}</span></td>
-                    <td>${p.comm}</td>
-                    <td><span class="user-badge">${p.username}</span></td>
-                    <td>${p.old_uid}</td>
-                    <td style="color:var(--danger);font-weight:700">${p.new_uid}</td>
-                    <td>${p.escalation_count}</td>
-                    <td class="ts-cell">${fmtTime(p.first_seen)}</td>
-                    <td class="ts-cell">${fmtTime(p.last_seen)}</td>
-                `);
+                patchTable(
+                    'table-global-priv',
+                    data.priv_esc,
+                    p => `${p.pid}-${p.old_uid}-${p.new_uid}`,
+                    p => [
+                        { html: `<span class="tag">${p.pid}</span>`,                         raw: p.pid },
+                        { html: `${p.comm}`,                                                 raw: p.comm },
+                        { html: `<span class="user-badge">${p.username}</span>`,             raw: p.username },
+                        { html: `${p.old_uid}`,                                              raw: p.old_uid },
+                        { html: `<span style="color:var(--danger);font-weight:700">${p.new_uid}</span>`, raw: p.new_uid },
+                        { html: `${p.escalation_count}`,                                     raw: p.escalation_count },
+                        { html: `<span class="ts-cell">${fmtTime(p.first_seen)}</span>`,     raw: p.first_seen },
+                        { html: `<span class="ts-cell">${fmtTime(p.last_seen)}</span>`,      raw: p.last_seen },
+                    ]
+                );
             } else {
                 renderEmpty('table-global-priv', 'No privilege escalations detected');
             }
         }
-
-        restoreScrolls(scrolls);
     }
 
     // ═══════════════════════════════════════════════════════
-    //  DATA FETCH — reads SQLite via Electron IPC (no HTTP server)
+    //  DATA FETCH
+    //  • Reads SQLite via Electron IPC, or falls back to HTTP
+    //  • Skips fetch when the window is hidden (page not visible)
+    //  • Uses Page Visibility API to avoid polling in background
     // ═══════════════════════════════════════════════════════
+    let fetchPending = false;
+
     async function fetchData() {
+        if (fetchPending) return;          // don't pile up requests
+        if (document.hidden) return;       // don't waste IPC / HTTP when tab hidden
+
+        fetchPending = true;
         try {
             let data;
             if (window.electronAPI) {
@@ -397,9 +483,16 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) {
             document.getElementById('status-text').textContent = 'Offline';
             console.error('Data error:', err);
+        } finally {
+            fetchPending = false;
         }
     }
 
     fetchData();
     setInterval(fetchData, 2000);
+
+    // Re-fetch immediately when user returns to the tab (no stale-data lag)
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) fetchData();
+    });
 });
