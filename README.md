@@ -22,40 +22,13 @@
 
 ![Per Process View](docs/screenshots/01_per_process.png)
 
----
-
-### Global Network Flows
-> Full real-time table of all UDP/TCP flows across every monitored process. Sortable by any column.
-
-![Global Network Flows](docs/screenshots/02_global_network.png)
-
----
-
-### Process Detail — Deep Inspection
-> Drill into any process: see its individual network sockets, file descriptors, bytes written, and privilege events — all live-updating without a page reload.
-
-![Process Detail](docs/screenshots/03_process_detail.png)
-
----
-
-### Global Privilege Escalations
-> Kernel-level detection of `commit_creds()` calls. Captures UID transitions, escalation count, and first/last-seen timestamps.
-
-![Global Privilege Escalations](docs/screenshots/04_priv_escalations.png)
-
----
 
 ### Threat Detection Engine
 > Real-time evaluation of suspicious behavior. Automatically flags ransomware behavior (rapid file modifications), suspicious binaries with network connections, and data exfiltration heuristics.
 
 ![Detected Threats](docs/screenshots/06_threats.png)
 
----
 
-### Configurable Threat Rules
-> Dynamic Settings panel to configure threat detection rules on the fly without restarting the application.
-
-![Settings Panel](docs/screenshots/07_settings.png)
 ---
 
 ## Architecture
