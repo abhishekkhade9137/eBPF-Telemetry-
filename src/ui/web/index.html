@@ -33,6 +33,12 @@
             <a href="#" class="nav-item" data-target="global-priv">
                 <span class="nav-icon">⚠</span> Global Privilege
             </a>
+            <a href="#" class="nav-item" data-target="threats">
+                <span class="nav-icon" style="color:var(--danger)">☢</span> Threats
+            </a>
+            <a href="#" class="nav-item" data-target="settings">
+                <span class="nav-icon" style="color:var(--text-secondary)">⚙</span> Settings
+            </a>
         </nav>
 
         <div class="sidebar-footer">
@@ -70,7 +76,7 @@
                     <div class="table-container">
                         <table id="table-processes">
                             <thead><tr>
-                                <th class="sortable" data-col="0" data-type="num">PID <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="0" data-type="num">PID(s) <span class="sort-icon">⇅</span></th>
                                 <th class="sortable" data-col="1" data-type="str">Process <span class="sort-icon">⇅</span></th>
                                 <th class="sortable" data-col="2" data-type="num">Net Flows <span class="sort-icon">⇅</span></th>
                                 <th class="sortable" data-col="3" data-type="num">TX Pkts <span class="sort-icon">⇅</span></th>
@@ -218,6 +224,52 @@
                             </tr></thead>
                             <tbody></tbody>
                         </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ══ Threats ═════════════════════════════════════ -->
+            <section id="threats" class="section">
+                <div class="card" style="border-color: rgba(255,255,255,0.2);">
+                    <h2 style="color: var(--danger);">Detected Threats</h2>
+                    <div class="table-container">
+                        <table id="table-threats">
+                            <thead><tr>
+                                <th class="sortable" data-col="0" data-type="str">Process <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="1" data-type="str">PID(s) <span class="sort-icon">⇅</span></th>
+                                <th class="sortable" data-col="2" data-type="str">Severity <span class="sort-icon">⇅</span></th>
+                                <th>Reason(s)</th>
+                                <th></th>
+                            </tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ══ Settings ════════════════════════════════════ -->
+            <section id="settings" class="section">
+                <div class="card">
+                    <h2>Threat Engine Configuration</h2>
+                    <div style="max-width: 600px; margin-top: 20px;">
+                        <div class="form-group" style="margin-bottom: 20px;">
+                            <label style="display:block; font-size: 13px; color: var(--text-secondary); margin-bottom: 8px;">Suspicious Process Names (comma-separated)</label>
+                            <input type="text" id="config-names" class="search-box" style="width: 100%;" value="nc, ncat, netcat, bash, sh, curl, wget">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 20px;">
+                            <label style="display:block; font-size: 13px; color: var(--text-secondary); margin-bottom: 8px;">File I/O Threshold (MB)</label>
+                            <input type="number" id="config-io" class="search-box" style="width: 100px;" value="50">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 20px;">
+                            <label style="display:block; font-size: 13px; color: var(--text-secondary); margin-bottom: 8px;">Network Threshold (Packets)</label>
+                            <input type="number" id="config-net" class="search-box" style="width: 100px;" value="1000">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 30px;">
+                            <label style="display:block; font-size: 13px; color: var(--text-secondary); margin-bottom: 8px;">Files Touched Threshold</label>
+                            <input type="number" id="config-files" class="search-box" style="width: 100px;" value="100">
+                        </div>
+                        <button id="btn-save-settings" style="background: var(--accent); color: var(--bg-main); padding: 10px 20px; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; transition: opacity 0.2s;">Save Settings</button>
+                        <span id="settings-msg" style="margin-left: 14px; font-size: 13px; color: var(--success); opacity: 0; transition: opacity 0.2s;">Saved!</span>
                     </div>
                 </div>
             </section>

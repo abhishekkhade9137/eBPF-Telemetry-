@@ -4,10 +4,17 @@ document.addEventListener('DOMContentLoaded', () => {
     //  STATE
     // ═══════════════════════════════════════════════════════
     let latestData   = { flows: [], file_writes: [], priv_esc: [], net_stats: [] };
-    let currentPid   = null;
+    let currentComm  = null;
     let sortState    = {};            // { tableId: { col, dir, type } }
     let activeSubTab = 'detail-network';
     let activeSection = 'processes';
+    let tableLimits  = {};
+
+    function resetLimits(prefix) {
+        Object.keys(tableLimits).forEach(k => {
+            if (k.startsWith(prefix)) tableLimits[k] = 50;
+        });
+    }
 
     // ─── Keyed-row tracking: tableId → Map<key, tr> ────────
     // Lets us patch only changed cells instead of rebuilding the whole table.
@@ -27,6 +34,8 @@ document.addEventListener('DOMContentLoaded', () => {
         'global-network': 'Global Network Flows',
         'global-io':      'Global File I/O',
         'global-priv':    'Global Privilege Escalations',
+        'threats':        'Detected Threats',
+        'settings':       'Settings',
     };
 
     function showSection(id) {
@@ -47,13 +56,16 @@ document.addEventListener('DOMContentLoaded', () => {
     navItems.forEach(item => {
         item.addEventListener('click', e => {
             e.preventDefault();
-            currentPid = null;
+            currentComm = null;
+            resetLimits('table-global');
+            resetLimits('table-processes');
             showSection(item.dataset.target);
         });
     });
 
     btnBack.addEventListener('click', () => {
-        currentPid = null;
+        currentComm = null;
+        resetLimits('table-processes');
         showSection('processes');
     });
 
@@ -124,6 +136,7 @@ document.addEventListener('DOMContentLoaded', () => {
         'table-processes',
         'table-global-network', 'table-global-io', 'table-global-priv',
         'table-detail-network', 'table-detail-io', 'table-detail-priv',
+        'table-threats'
     ].forEach(makeSortable);
 
     // ═══════════════════════════════════════════════════════
@@ -168,28 +181,57 @@ document.addEventListener('DOMContentLoaded', () => {
     // ═══════════════════════════════════════════════════════
     //  KEYED DIFF RENDERER — NO full wipe, NO scroll jump
     // ═══════════════════════════════════════════════════════
+
+    function updateLoadMoreButton(tableId, totalRows, limit) {
+        let btn = document.getElementById(`btn-load-more-${tableId}`);
+        if (!btn) {
+            btn = document.createElement('button');
+            btn.id = `btn-load-more-${tableId}`;
+            btn.className = 'btn-load-more';
+            const table = document.getElementById(tableId);
+            const container = table.closest('.table-container');
+            container.parentNode.insertBefore(btn, container.nextSibling);
+            
+            btn.addEventListener('click', () => {
+                tableLimits[tableId] = (tableLimits[tableId] || 50) + 50;
+                if (latestData) updateAll(latestData);
+            });
+        }
+        if (totalRows > limit) {
+            btn.style.display = 'block';
+            btn.innerHTML = `Load 50 More <span>(Showing ${limit} of ${totalRows})</span>`;
+        } else {
+            btn.style.display = 'none';
+        }
+    }
+
     /**
      * Diff-patches a tbody using a stable key per row.
      *
      * @param {string}   tableId
      * @param {Array}    rows        – data rows to display
      * @param {Function} keyFn       – (row) => unique string key
-     * @param {Function} cellsFn     – (row) => array of {html, raw} per cell
-     *                                   `html` is innerHTML, `raw` is the text used
-     *                                   for dirty-check (omit to always use html)
+     * @param {Function} rawFn       – (row) => array of raw primitive values for dirty checking
+     * @param {Function} htmlFn      – (row, colIndex) => string of HTML to render if dirty
      * @param {Function} [onNew]     – optional callback(tr, row) after a new <tr> is inserted
      */
-    function patchTable(tableId, rows, keyFn, cellsFn, onNew) {
+    function patchTable(tableId, rows, keyFn, rawFn, htmlFn, onNew) {
         const tbody = document.querySelector(`#${tableId} tbody`);
         if (!tbody) return;
 
         if (!rowMaps[tableId]) rowMaps[tableId] = new Map();
         const map = rowMaps[tableId];
 
-        if (!rows.length) {
+        if (!tableLimits[tableId]) tableLimits[tableId] = 50;
+        const limit = tableLimits[tableId];
+        const totalRows = rows.length;
+        const visibleRows = rows.slice(0, limit);
+
+        if (!visibleRows.length) {
             // Preserve empty-state only if already shown
             if (tbody.querySelector('.empty-state')) return;
             renderEmpty(tableId, 'No data yet');
+            updateLoadMoreButton(tableId, 0, limit);
             return;
         }
 
@@ -202,32 +244,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const newKeys = new Set();
 
-        rows.forEach((row, idx) => {
+        visibleRows.forEach((row, idx) => {
             const key = keyFn(row);
             newKeys.add(key);
-            const cells = cellsFn(row);
+            const raws = rawFn(row);
 
             if (map.has(key)) {
                 // ── Existing row: patch only changed cells ──────────
                 const tr = map.get(key);
-                cells.forEach((cell, ci) => {
+                raws.forEach((rawVal, ci) => {
                     const td = tr.cells[ci];
                     if (!td) return;
-                    const dirty = cell.raw !== undefined
-                        ? td.dataset.raw !== String(cell.raw)
-                        : td.innerHTML !== cell.html;
-                    if (dirty) {
-                        td.innerHTML = cell.html;
-                        if (cell.raw !== undefined) td.dataset.raw = String(cell.raw);
+                    if (td.dataset.raw !== String(rawVal)) {
+                        td.innerHTML = htmlFn(row, ci);
+                        td.dataset.raw = String(rawVal);
                     }
                 });
             } else {
                 // ── New row: create and insert ──────────────────────
                 const tr = document.createElement('tr');
-                cells.forEach(cell => {
+                raws.forEach((rawVal, ci) => {
                     const td = document.createElement('td');
-                    td.innerHTML = cell.html;
-                    if (cell.raw !== undefined) td.dataset.raw = String(cell.raw);
+                    td.innerHTML = htmlFn(row, ci);
+                    td.dataset.raw = String(rawVal);
                     tr.appendChild(td);
                 });
                 tbody.appendChild(tr);
@@ -246,99 +285,93 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Re-apply sort only if we added/removed rows (order may have changed)
         reapplySort(tableId);
+
+        updateLoadMoreButton(tableId, totalRows, limit);
     }
 
-    // ═══════════════════════════════════════════════════════
-    //  BUILD PROCESS MAP  (single call per update cycle)
-    // ═══════════════════════════════════════════════════════
-    function buildPidMap(data) {
-        const map = {};
-        const ensure = (pid, comm) => {
-            if (!map[pid]) map[pid] = { pid, comm, flows: 0, tx: 0, rx: 0, writes: 0, bytes: 0, privEsc: false };
-        };
-        data.flows.forEach(f => {
-            ensure(f.pid, f.comm);
-            map[f.pid].flows++;
-            map[f.pid].tx += f.tx_packets;
-            map[f.pid].rx += f.rx_packets;
-        });
-        data.file_writes.forEach(w => {
-            ensure(w.pid, w.comm);
-            map[w.pid].writes += w.write_calls;
-            map[w.pid].bytes  += w.bytes_written;
-        });
-        data.priv_esc.forEach(p => {
-            ensure(p.pid, p.comm);
-            map[p.pid].privEsc = true;
-        });
-        return map;
-    }
 
     // ═══════════════════════════════════════════════════════
     //  PROCESS DETAIL VIEW
     // ═══════════════════════════════════════════════════════
-    function openProcessDetail(pid, resetSubTab, pidMap) {
-        currentPid = pid;
+    function openProcessDetail(comm, resetSubTab, commMap) {
+        currentComm = comm;
         const data = latestData;
-        const p    = pidMap[pid];
+        const p    = commMap[comm];
         if (!p) return;
 
         document.getElementById('detail-avatar').textContent = p.comm[0]?.toUpperCase() || '?';
         document.getElementById('detail-name').textContent   = p.comm;
-        document.getElementById('detail-pid').textContent    = `PID ${p.pid}`;
+        
+        const pidsText = p.pids.length > 5 ? 
+            `${p.pids.slice(0,5).join(', ')}... (${p.pids.length} total)` : 
+            p.pids.join(', ');
+        document.getElementById('detail-pid').textContent    = `PIDs: ${pidsText}`;
+
         document.getElementById('d-flows').textContent  = p.flows;
         document.getElementById('d-tx').textContent     = p.tx;
         document.getElementById('d-rx').textContent     = p.rx;
         document.getElementById('d-writes').textContent = p.writes;
         document.getElementById('d-bytes').textContent  = fmtBytes(p.bytes);
 
-        if (resetSubTab) activeSubTab = 'detail-network';
+        if (resetSubTab) {
+            activeSubTab = 'detail-network';
+            resetLimits('table-detail');
+        }
         applySubTab(activeSubTab);
 
-        // Network flows for this PID
-        const pidFlows = data.flows.filter(f => f.pid === pid);
+        // Network flows for this COMM
+        const commFlows = data.flows.filter(f => f.comm === comm);
         patchTable(
             'table-detail-network',
-            pidFlows,
-            f => `${f.local_ip}:${f.local_port}-${f.remote_ip}:${f.remote_port}`,
-            f => [
-                { html: `<code>${f.local_ip}</code>`,  raw: f.local_ip },
-                { html: `${f.local_port}`,             raw: f.local_port },
-                { html: `<code>${f.remote_ip}</code>`, raw: f.remote_ip },
-                { html: `${f.remote_port}`,            raw: f.remote_port },
-                { html: `${f.tx_packets}`,             raw: f.tx_packets },
-                { html: `${f.rx_packets}`,             raw: f.rx_packets },
-            ]
+            commFlows,
+            f => `${f.pid}-${f.local_ip}:${f.local_port}-${f.remote_ip}:${f.remote_port}`,
+            f => [ f.pid, f.local_ip, f.local_port, f.remote_ip, f.remote_port, f.tx_packets, f.rx_packets ],
+            (f, i) => {
+                switch(i) {
+                    case 0: return `<span class="tag">${f.pid}</span> <code>${f.local_ip}</code>`;
+                    case 1: return `${f.local_port}`;
+                    case 2: return `<code>${f.remote_ip}</code>`;
+                    case 3: return `${f.remote_port}`;
+                    case 4: return `${f.tx_packets}`;
+                    case 5: return `${f.rx_packets}`;
+                }
+            }
         );
 
-        // File I/O for this PID
-        const pidIO = data.file_writes.filter(w => w.pid === pid);
+        // File I/O for this COMM
+        const commIO = data.file_writes.filter(w => w.comm === comm);
         patchTable(
             'table-detail-io',
-            pidIO,
+            commIO,
             w => `${w.pid}-${w.fd}`,
-            w => [
-                { html: `${w.fd}`,                raw: w.fd },
-                { html: `${w.write_calls}`,        raw: w.write_calls },
-                { html: `${fmtBytes(w.bytes_written)}`, raw: w.bytes_written },
-            ]
+            w => [ w.pid, w.fd, w.write_calls, w.bytes_written ],
+            (w, i) => {
+                switch(i) {
+                    case 0: return `<span class="tag">${w.pid}</span> ${w.fd}`;
+                    case 1: return `${w.write_calls}`;
+                    case 2: return `${fmtBytes(w.bytes_written)}`;
+                }
+            }
         );
 
-        // Privilege escalations for this PID
-        const pidPriv = data.priv_esc.filter(pr => pr.pid === pid);
-        if (pidPriv.length) {
+        // Privilege escalations for this COMM
+        const commPriv = data.priv_esc.filter(pr => pr.comm === comm);
+        if (commPriv.length) {
             patchTable(
                 'table-detail-priv',
-                pidPriv,
+                commPriv,
                 pr => `${pr.pid}-${pr.old_uid}-${pr.new_uid}`,
-                pr => [
-                    { html: `<span class="user-badge">${pr.username}</span>`, raw: pr.username },
-                    { html: `${pr.old_uid}`,           raw: pr.old_uid },
-                    { html: `<span style="color:var(--danger);font-weight:700">${pr.new_uid}</span>`, raw: pr.new_uid },
-                    { html: `${pr.escalation_count}`,  raw: pr.escalation_count },
-                    { html: `<span class="ts-cell">${fmtTime(pr.first_seen)}</span>`, raw: pr.first_seen },
-                    { html: `<span class="ts-cell">${fmtTime(pr.last_seen)}</span>`,  raw: pr.last_seen },
-                ]
+                pr => [ pr.pid, pr.username, pr.old_uid, pr.new_uid, pr.escalation_count, pr.first_seen, pr.last_seen ],
+                (pr, i) => {
+                    switch(i) {
+                        case 0: return `<span class="tag">${pr.pid}</span> <span class="user-badge">${pr.username}</span>`;
+                        case 1: return `${pr.old_uid}`;
+                        case 2: return `<span style="color:var(--danger);font-weight:700">${pr.new_uid}</span>`;
+                        case 3: return `${pr.escalation_count}`;
+                        case 4: return `<span class="ts-cell">${fmtTime(pr.first_seen)}</span>`;
+                        case 5: return `<span class="ts-cell">${fmtTime(pr.last_seen)}</span>`;
+                    }
+                }
             );
         } else {
             renderEmpty('table-detail-priv', 'No privilege escalations for this process');
@@ -353,51 +386,53 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateAll(data) {
         latestData = data;
 
-        // Build the pid aggregation map ONCE per cycle
-        const pidMap = buildPidMap(data);
+        const commMap = data.commMap || {};
+        const procList = data.procList || [];
 
         // ── Top-bar stats (text node patches, no layout) ──────
-        document.getElementById('stat-procs').textContent = Object.keys(pidMap).length;
+        document.getElementById('stat-procs').textContent = Object.keys(commMap).length;
         document.getElementById('stat-flows').textContent = data.flows.length;
         document.getElementById('stat-io').textContent    = data.file_writes.reduce((a, w) => a + w.write_calls, 0);
         document.getElementById('stat-priv').textContent  = data.priv_esc.reduce((a, p) => a + p.escalation_count, 0);
 
         // ── Per-process table (keyed diff, no scroll reset) ───
         if (activeSection !== 'process-detail') {
-            const procList = Object.values(pidMap).sort((a, b) => (b.tx + b.rx) - (a.tx + a.rx));
             patchTable(
                 'table-processes',
                 procList,
-                p => String(p.pid),
-                p => [
-                    { html: `<span class="tag">${p.pid}</span>`, raw: p.pid },
-                    { html: `<strong>${p.comm}</strong>`,        raw: p.comm },
-                    { html: `${p.flows}`,   raw: p.flows },
-                    { html: `${p.tx}`,      raw: p.tx },
-                    { html: `${p.rx}`,      raw: p.rx },
-                    { html: `${p.writes}`,  raw: p.writes },
-                    { html: `${fmtBytes(p.bytes)}`, raw: p.bytes },
-                    { html: p.privEsc
-                        ? '<span class="badge-danger">⚠ YES</span>'
-                        : '<span class="badge-ok">✓ No</span>',   raw: p.privEsc ? 1 : 0 },
-                    { html: `<button class="btn-detail">Inspect →</button>`, raw: p.pid },
-                ],
+                p => p.comm,
+                p => [ p.pids.join(','), p.comm, p.flows, p.tx, p.rx, p.writes, p.bytes, p.privEsc ? 1 : 0, p.comm ],
+                (p, i) => {
+                    switch(i) {
+                        case 0: 
+                            const pidText = p.pids.length === 1 ? p.pids[0] : `${p.pids.length} PIDs`;
+                            return `<span class="tag">${pidText}</span>`;
+                        case 1: return `<strong>${p.comm}</strong>`;
+                        case 2: return `${p.flows}`;
+                        case 3: return `${p.tx}`;
+                        case 4: return `${p.rx}`;
+                        case 5: return `${p.writes}`;
+                        case 6: return `${fmtBytes(p.bytes)}`;
+                        case 7: return p.privEsc ? '<span class="badge-danger">⚠ YES</span>' : '<span class="badge-ok">✓ No</span>';
+                        case 8: return `<button class="btn-detail">Inspect →</button>`;
+                    }
+                },
                 (tr, p) => {
                     // Wire up click handlers only once, when the row is NEW
                     tr.classList.add('clickable');
                     tr.querySelector('.btn-detail').addEventListener('click', e => {
                         e.stopPropagation();
-                        openProcessDetail(p.pid, true, buildPidMap(latestData));
+                        openProcessDetail(p.comm, true, latestData.commMap);
                     });
-                    tr.addEventListener('click', () => openProcessDetail(p.pid, true, buildPidMap(latestData)));
+                    tr.addEventListener('click', () => openProcessDetail(p.comm, true, latestData.commMap));
                 }
             );
             applySearch(); // restore search filter
         }
 
         // ── Refresh detail view live without resetting tab/scroll
-        if (currentPid !== null) {
-            openProcessDetail(currentPid, false, pidMap);
+        if (currentComm !== null) {
+            openProcessDetail(currentComm, false, commMap);
         }
 
         // ── Global tabs — only render when visible ────────────
@@ -406,16 +441,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 'table-global-network',
                 data.flows,
                 f => `${f.pid}-${f.local_ip}:${f.local_port}-${f.remote_ip}:${f.remote_port}`,
-                f => [
-                    { html: `<span class="tag">${f.pid}</span>`, raw: f.pid },
-                    { html: `${f.comm}`,                         raw: f.comm },
-                    { html: `<code>${f.local_ip}</code>`,        raw: f.local_ip },
-                    { html: `${f.local_port}`,                   raw: f.local_port },
-                    { html: `<code>${f.remote_ip}</code>`,       raw: f.remote_ip },
-                    { html: `${f.remote_port}`,                  raw: f.remote_port },
-                    { html: `${f.tx_packets}`,                   raw: f.tx_packets },
-                    { html: `${f.rx_packets}`,                   raw: f.rx_packets },
-                ]
+                f => [ f.pid, f.comm, f.local_ip, f.local_port, f.remote_ip, f.remote_port, f.tx_packets, f.rx_packets ],
+                (f, i) => {
+                    switch(i) {
+                        case 0: return `<span class="tag">${f.pid}</span>`;
+                        case 1: return `${f.comm}`;
+                        case 2: return `<code>${f.local_ip}</code>`;
+                        case 3: return `${f.local_port}`;
+                        case 4: return `<code>${f.remote_ip}</code>`;
+                        case 5: return `${f.remote_port}`;
+                        case 6: return `${f.tx_packets}`;
+                        case 7: return `${f.rx_packets}`;
+                    }
+                }
             );
         }
 
@@ -424,13 +462,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 'table-global-io',
                 data.file_writes,
                 w => `${w.pid}-${w.fd}`,
-                w => [
-                    { html: `<span class="tag">${w.pid}</span>`, raw: w.pid },
-                    { html: `${w.comm}`,                         raw: w.comm },
-                    { html: `${w.fd}`,                           raw: w.fd },
-                    { html: `${w.write_calls}`,                  raw: w.write_calls },
-                    { html: `${fmtBytes(w.bytes_written)}`,      raw: w.bytes_written },
-                ]
+                w => [ w.pid, w.comm, w.fd, w.write_calls, w.bytes_written ],
+                (w, i) => {
+                    switch(i) {
+                        case 0: return `<span class="tag">${w.pid}</span>`;
+                        case 1: return `${w.comm}`;
+                        case 2: return `${w.fd}`;
+                        case 3: return `${w.write_calls}`;
+                        case 4: return `${fmtBytes(w.bytes_written)}`;
+                    }
+                }
             );
         }
 
@@ -440,19 +481,53 @@ document.addEventListener('DOMContentLoaded', () => {
                     'table-global-priv',
                     data.priv_esc,
                     p => `${p.pid}-${p.old_uid}-${p.new_uid}`,
-                    p => [
-                        { html: `<span class="tag">${p.pid}</span>`,                         raw: p.pid },
-                        { html: `${p.comm}`,                                                 raw: p.comm },
-                        { html: `<span class="user-badge">${p.username}</span>`,             raw: p.username },
-                        { html: `${p.old_uid}`,                                              raw: p.old_uid },
-                        { html: `<span style="color:var(--danger);font-weight:700">${p.new_uid}</span>`, raw: p.new_uid },
-                        { html: `${p.escalation_count}`,                                     raw: p.escalation_count },
-                        { html: `<span class="ts-cell">${fmtTime(p.first_seen)}</span>`,     raw: p.first_seen },
-                        { html: `<span class="ts-cell">${fmtTime(p.last_seen)}</span>`,      raw: p.last_seen },
-                    ]
+                    p => [ p.pid, p.comm, p.username, p.old_uid, p.new_uid, p.escalation_count, p.first_seen, p.last_seen ],
+                    (p, i) => {
+                        switch(i) {
+                            case 0: return `<span class="tag">${p.pid}</span>`;
+                            case 1: return `${p.comm}`;
+                            case 2: return `<span class="user-badge">${p.username}</span>`;
+                            case 3: return `${p.old_uid}`;
+                            case 4: return `<span style="color:var(--danger);font-weight:700">${p.new_uid}</span>`;
+                            case 5: return `${p.escalation_count}`;
+                            case 6: return `<span class="ts-cell">${fmtTime(p.first_seen)}</span>`;
+                            case 7: return `<span class="ts-cell">${fmtTime(p.last_seen)}</span>`;
+                        }
+                    }
                 );
             } else {
                 renderEmpty('table-global-priv', 'No privilege escalations detected');
+            }
+        }
+
+        if (activeSection === 'threats') {
+            const threats = data.threats || [];
+            if (threats.length) {
+                patchTable(
+                    'table-threats',
+                    threats,
+                    t => t.comm,
+                    t => [ t.comm, t.pids.join(','), t.severity, t.reasons.join('; '), t.comm ],
+                    (t, i) => {
+                        switch(i) {
+                            case 0: return `<strong>${t.comm}</strong>`;
+                            case 1: return `<span class="tag">${t.pids.length === 1 ? t.pids[0] : t.pids.length + ' PIDs'}</span>`;
+                            case 2: return `<span class="${t.severity === 'High' ? 'badge-danger' : 'tag'}">${t.severity}</span>`;
+                            case 3: return `<span style="color:var(--text-secondary);font-size:12px">${t.reasons.join('<br>')}</span>`;
+                            case 4: return `<button class="btn-detail">Inspect →</button>`;
+                        }
+                    },
+                    (tr, t) => {
+                        tr.classList.add('clickable');
+                        tr.querySelector('.btn-detail').addEventListener('click', e => {
+                            e.stopPropagation();
+                            openProcessDetail(t.comm, true, latestData.commMap);
+                        });
+                        tr.addEventListener('click', () => openProcessDetail(t.comm, true, latestData.commMap));
+                    }
+                );
+            } else {
+                renderEmpty('table-threats', 'No threats detected on the system.');
             }
         }
     }
@@ -495,4 +570,37 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden) fetchData();
     });
+
+    // ═══════════════════════════════════════════════════════
+    //  SETTINGS CONFIGURATION
+    // ═══════════════════════════════════════════════════════
+    const btnSaveSettings = document.getElementById('btn-save-settings');
+    if (btnSaveSettings) {
+        btnSaveSettings.addEventListener('click', async () => {
+            const namesVal = document.getElementById('config-names').value;
+            const ioVal = parseInt(document.getElementById('config-io').value, 10);
+            const netVal = parseInt(document.getElementById('config-net').value, 10);
+            const filesVal = parseInt(document.getElementById('config-files').value, 10);
+
+            const names = namesVal.split(',').map(s => s.trim()).filter(Boolean);
+
+            const newConfig = {
+                suspiciousNames: names,
+                ioThresholdMB: isNaN(ioVal) ? 50 : ioVal,
+                networkThresholdPkts: isNaN(netVal) ? 1000 : netVal,
+                filesTouchedThreshold: isNaN(filesVal) ? 100 : filesVal
+            };
+
+            if (window.electronAPI && window.electronAPI.updateConfig) {
+                await window.electronAPI.updateConfig(newConfig);
+            }
+
+            const msg = document.getElementById('settings-msg');
+            msg.style.opacity = '1';
+            setTimeout(() => msg.style.opacity = '0', 2000);
+            
+            // Force data refresh to apply new rules immediately
+            fetchData();
+        });
+    }
 });

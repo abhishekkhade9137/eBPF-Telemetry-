@@ -139,3 +139,8 @@ code { font-family:monospace; font-size:12px; }
 
 /* ── Timestamp cells ─────────────────────────────────────── */
 .ts-cell { font-family:monospace; font-size:12px; color:var(--text-secondary); letter-spacing:0.3px; }
+
+/* ── Pagination ──────────────────────────────────────────── */
+.btn-load-more { width: 100%; padding: 12px; background: rgba(255, 255, 255, 0.02); color: var(--text-secondary); border: none; border-top: 1px dashed var(--border); cursor: pointer; text-align: center; font-size: 12px; font-weight: 600; transition: all 0.15s; border-radius: 0 0 14px 14px; }
+.btn-load-more:hover { background: rgba(255, 255, 255, 0.06); color: var(--text-primary); }
+.btn-load-more span { font-weight: 400; opacity: 0.6; margin-left: 6px; }
