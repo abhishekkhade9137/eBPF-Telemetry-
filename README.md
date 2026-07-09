@@ -45,6 +45,19 @@
 
 ---
 
+### Threat Detection Engine
+> Real-time evaluation of suspicious behavior. Automatically flags ransomware behavior (rapid file modifications), suspicious binaries with network connections, and data exfiltration heuristics.
+
+![Detected Threats](docs/screenshots/06_threats.png)
+
+---
+
+### Configurable Threat Rules
+> Dynamic Settings panel to configure threat detection rules on the fly without restarting the application.
+
+![Settings Panel](docs/screenshots/07_settings.png)
+---
+
 ## Architecture
 
 ![System Architecture](docs/screenshots/05_architecture.png)
